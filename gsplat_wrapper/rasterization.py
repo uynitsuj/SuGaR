@@ -5,11 +5,19 @@ from .utils import fov2focal, SH2RGB
 import math
 
 
-def get_intrinsics_for_gsplat(fx, fy, width, height):
+# def get_intrinsics_for_gsplat(fx, fy, width, height):
+#     return torch.tensor(
+#         [
+#             [fx, 0, width / 2],
+#             [0, fy, height / 2],
+#             [0, 0, 1],
+#         ]
+#     )
+def get_intrinsics_for_gsplat(fx, fy, cx, cy):
     return torch.tensor(
         [
-            [fx, 0, width / 2],
-            [0, fy, height / 2],
+            [fx, 0, cx],
+            [0, fy, cy],
             [0, 0, 1],
         ]
     )
@@ -22,10 +30,12 @@ class GaussianRasterizationSettings:
         image_width:int,
         tanfovx:float,
         tanfovy:float,
+        cx:float,
+        cy:float,
         bg:torch.Tensor,
         scale_modifier:float,
         viewmatrix:torch.Tensor,
-        projmatrix:torch.Tensor,
+        # projmatrix:torch.Tensor,
         sh_degree:int,
         campos:torch.Tensor,
         prefiltered:bool,
@@ -35,10 +45,12 @@ class GaussianRasterizationSettings:
         self.image_width = image_width
         self.tanfovx = tanfovx
         self.tanfovy = tanfovy
+        self.cx = cx
+        self.cy = cy
         self.bg = bg
         self.scale_modifier = scale_modifier
         self.viewmatrix = viewmatrix
-        self.projmatrix = projmatrix
+        # self.projmatrix = projmatrix
         self.sh_degree = sh_degree
         self.campos = campos
         self.prefiltered = prefiltered
@@ -54,10 +66,12 @@ class GaussianRasterizer(nn.Module):
         self.image_width = raster_settings.image_width
         self.tanfovx = raster_settings.tanfovx
         self.tanfovy = raster_settings.tanfovy
+        self.cx = raster_settings.cx
+        self.cy = raster_settings.cy
         self.bg = raster_settings.bg
         self.scale_modifier = raster_settings.scale_modifier
         self.viewmatrix = raster_settings.viewmatrix
-        self.projmatrix = raster_settings.projmatrix
+        # self.projmatrix = raster_settings.projmatrix
         self.sh_degree = raster_settings.sh_degree
         self.campos = raster_settings.campos
         self.prefiltered = raster_settings.prefiltered
@@ -68,7 +82,7 @@ class GaussianRasterizer(nn.Module):
         
         self.K = get_intrinsics_for_gsplat(
             self.fx, self.fy, 
-            self.image_width, self.image_height
+            self.cx, self.cy
         )[None].to(self.viewmatrix.device)
         
         if len(self.bg.shape) == 1:
@@ -85,6 +99,7 @@ class GaussianRasterizer(nn.Module):
         else:
             sh_degree = None
         
+        
         render_colors, render_alphas, info = rasterization(
             means=means3D,
             quats=rotations,
@@ -92,16 +107,16 @@ class GaussianRasterizer(nn.Module):
             opacities=opacities[..., 0] if len(opacities.shape)>1 else opacities,
             colors=shs if colors_precomp is None else colors_precomp,
             sh_degree=sh_degree,
-            viewmats=self.viewmatrix.transpose(-1, -2)[None],
+            viewmats=self.viewmatrix,
             Ks=self.K,
             width=self.image_width,
             height=self.image_height,
             backgrounds=self.bg,
             near_plane=0.01,  # TODO
             far_plane=1e10,  # TODO
-            eps2d=0.3,
+            # eps2d=0.3,
             render_mode='RGB',  # 'RGB', 'D', 'ED', 'RGB+D', 'RGB+ED'
-            packed=True,
+            packed=False,
             absgrad=False,
             sparse_grad=False,
             rasterize_mode='classic',  # 'classic', 'antialiased'

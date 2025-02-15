@@ -230,7 +230,7 @@ def extract_mesh_from_coarse_sugar(args):
     )
     
     # use_centers_to_extract_mesh =  True
-    use_alpha = True
+    use_alpha = False
     alpha_radius = 0.01
     
     if not use_marching_cubes:

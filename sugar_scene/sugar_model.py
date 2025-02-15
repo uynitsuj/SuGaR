@@ -7,7 +7,8 @@ from pytorch3d.transforms import quaternion_apply, quaternion_invert, matrix_to_
 from pytorch3d.ops import knn_points, estimate_pointcloud_normals
 from pytorch3d.renderer import RasterizationSettings, MeshRasterizer
 from simple_knn._C import distCUDA2
-from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
+# from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
+from gsplat_wrapper.rasterization import GaussianRasterizationSettings, GaussianRasterizer
 from sugar_utils.spherical_harmonics import (
     eval_sh, RGB2SH, SH2RGB,
 )
@@ -297,6 +298,9 @@ class SuGaR(nn.Module):
             self.fy = 1.
         self.fov_x = focal2fov(self.fx, self.image_width)
         self.fov_y = focal2fov(self.fy, self.image_height)
+        self.cx = nerfmodel.training_cameras.cx
+        self.cy = nerfmodel.training_cameras.cy
+
         self.tanfovx = math.tan(self.fov_x * 0.5)
         self.tanfovy = math.tan(self.fov_y * 0.5)
         
@@ -847,6 +851,9 @@ class SuGaR(nn.Module):
         self.fy = cameras.fy[0].item()
         self.fov_x = focal2fov(self.fx, self.image_width)
         self.fov_y = focal2fov(self.fy, self.image_height)
+        self.cx = cameras.cx
+        self.cy = cameras.cy
+
         self.tanfovx = math.tan(self.fov_x * 0.5)
         self.tanfovy = math.tan(self.fov_y * 0.5)
         
@@ -2181,28 +2188,33 @@ class SuGaR(nn.Module):
         use_torch = False
         # NeRF 'transform_matrix' is a camera-to-world transform
         c2w = nerf_cameras.camera_to_worlds[camera_indices]
-        c2w = torch.cat([c2w, torch.Tensor([[0, 0, 0, 1]]).to(self.device)], dim=0).cpu().numpy() #.transpose(-1, -2)
+        # c2w = torch.cat([c2w, torch.Tensor([[0, 0, 0, 1]]).to(self.device)], dim=0).cpu().numpy() #.transpose(-1, -2)
         # change from OpenGL/Blender camera axes (Y up, Z back) to COLMAP (Y down, Z forward)
-        c2w[:3, 1:3] *= -1
+        # c2w[:3, 1:3] *= -1
 
         # get the world-to-camera transform and set R, T
-        w2c = np.linalg.inv(c2w)
-        R = np.transpose(w2c[:3,:3])  # R is stored transposed due to 'glm' in CUDA code
-        T = w2c[:3, 3]
+        # w2c = np.linalg.inv(c2w)
+        # R = np.transpose(w2c[:3,:3])  # R is stored transposed due to 'glm' in CUDA code
+        # T = w2c[:3, 3]
+        # import pdb; pdb.set_trace()
         
-        world_view_transform = torch.Tensor(getWorld2View(
-            R=R, t=T, tensor=use_torch)).transpose(0, 1).cuda()
+        # world_view_transform = torch.Tensor(getWorld2View(
+        #     R=R, t=T, tensor=use_torch)).transpose(0, 1).cuda()
+        # import pdb; pdb.set_trace()
+        viewmat = get_viewmat(c2w.unsqueeze(0))
         
         proj_transform = getProjectionMatrix(
             p3d_camera.znear.item(), 
             p3d_camera.zfar.item(), 
             self.fov_x, 
-            self.fov_y).transpose(0, 1).cuda()
+            self.fov_y,
+            self.cx,
+            self.cy).transpose(0, 1).cuda()
         # TODO: THE TWO FOLLOWING LINES ARE IMPORTANT! IT'S NOT HERE IN 3DGS CODE! Should make a PR when I have time
         proj_transform[..., 2, 0] = - p3d_camera.K[0, 0, 2]
         proj_transform[..., 2, 1] = - p3d_camera.K[0, 1, 2]
         
-        full_proj_transform = (world_view_transform.unsqueeze(0).bmm(proj_transform.unsqueeze(0))).squeeze(0)
+        # full_proj_transform = (viewmat.unsqueeze(0).bmm(proj_transform.unsqueeze(0))).squeeze(0)
         
 
         camera_center = p3d_camera.get_camera_center()
@@ -2215,10 +2227,12 @@ class SuGaR(nn.Module):
             image_width=int(self.image_width),
             tanfovx=self.tanfovx,
             tanfovy=self.tanfovy,
+            cx=self.cx,
+            cy=self.cy,
             bg=bg_color,
             scale_modifier=1.,
-            viewmatrix=world_view_transform,
-            projmatrix=full_proj_transform,
+            viewmatrix=viewmat,
+            # projmatrix=full_proj_transform,
             sh_degree=sh_deg,
             campos=camera_center,
             prefiltered=False,

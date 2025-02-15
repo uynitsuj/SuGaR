@@ -43,7 +43,7 @@ if __name__ == "__main__":
                         help='If True, center the bbox. Default is False.')
     
     # Parameters for refined SuGaR
-    parser.add_argument('-g', '--gaussians_per_triangle', type=int, default=6, 
+    parser.add_argument('-g', '--gaussians_per_triangle', type=int, default=1, 
                         help='Number of gaussians per triangle.')
     parser.add_argument('-f', '--refinement_iterations', type=int, default=15_000, 
                         help='Number of refinement iterations.')
@@ -54,7 +54,7 @@ if __name__ == "__main__":
                         'Computing a traditional colored UV texture should take less than 10 minutes.')
     parser.add_argument('--square_size',
                         default=8, type=int, help='Size of the square to use for the UV texture.')
-    parser.add_argument('--postprocess_mesh', type=str2bool, default=True, 
+    parser.add_argument('--postprocess_mesh', type=str2bool, default=False, 
                         help='If True, postprocess the mesh by removing border triangles with low-density. '
                         'This step takes a few minutes and is not needed in general, as it can also be risky. '
                         'However, it increases the quality of the mesh in some cases, especially when an object is visible only from one side.')
@@ -73,11 +73,11 @@ if __name__ == "__main__":
                         help='Use standard config for a low poly mesh, with 200k vertices and 6 Gaussians per triangle.')
     parser.add_argument('--high_poly', type=str2bool, default=False,
                         help='Use standard config for a high poly mesh, with 1M vertices and 1 Gaussians per triangle.')
-    parser.add_argument('--refinement_time', type=str, default='long', 
+    parser.add_argument('--refinement_time', type=str, default='short', 
                         help="Default configs for time to spend on refinement. Can be 'short', 'medium' or 'long'.")
       
     # Evaluation split
-    parser.add_argument('--eval', type=str2bool, default=True, help='Use eval split.')
+    parser.add_argument('--eval', type=str2bool, default=False, help='Use eval split.')
 
     # GPU
     parser.add_argument('--gpu', type=int, default=0, help='Index of GPU device to use.')
