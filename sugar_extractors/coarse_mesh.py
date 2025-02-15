@@ -10,6 +10,7 @@ from sugar_utils.general_utils import str2bool
 from sugar_utils.spherical_harmonics import SH2RGB
 
 from rich.console import Console
+import trimesh
 
 def extract_mesh_from_coarse_sugar(args):
     CONSOLE = Console(width=120)
@@ -60,7 +61,8 @@ def extract_mesh_from_coarse_sugar(args):
         surface_levels = [0.1, 0.3, 0.5]
     else:
         surface_levels = [args.surface_level]
-        
+    
+    surface_levels = [0.05]
     # Decimation targets
     if args.decimation_target is None:
         decimation_targets = [200_000, 1_000_000]
@@ -196,8 +198,8 @@ def extract_mesh_from_coarse_sugar(args):
         for i in range(n_quantiles):
             CONSOLE.print(f'Quantile {i/n_quantiles}:', sugar.strengths.quantile(i/n_quantiles).item())
             
-        CONSOLE.print("\nStarting pruning low opacity gaussians...")
-        sugar.drop_low_opacity_points(low_opacity_gaussian_pruning_threshold)
+        # CONSOLE.print("\nStarting pruning low opacity gaussians...")
+        # sugar.drop_low_opacity_points(low_opacity_gaussian_pruning_threshold)
 
         CONSOLE.print("Number of gaussians left:", sugar.n_points)
         CONSOLE.print("Opacities min/max/mean:", sugar.strengths.min(), sugar.strengths.max(), sugar.strengths.mean())
@@ -226,6 +228,10 @@ def extract_mesh_from_coarse_sugar(args):
             cameras=nerfmodel.training_cameras.p3d_cameras[0], 
             raster_settings=mesh_raster_settings,
     )
+    
+    # use_centers_to_extract_mesh =  True
+    use_alpha = True
+    alpha_radius = 0.01
     
     if not use_marching_cubes:
         if not use_centers_to_extract_mesh:
@@ -328,7 +334,7 @@ def extract_mesh_from_coarse_sugar(args):
                             surface_levels_outputs[surface_level]['view_directions'] = torch.cat([surface_levels_outputs[surface_level]['view_directions'], img_surface_view_directions[idx]], dim=0)
                             surface_levels_outputs[surface_level]['pix_to_gaussians'] = torch.cat([surface_levels_outputs[surface_level]['pix_to_gaussians'], img_surface_pix_to_gaussians[idx]], dim=0)
                             surface_levels_outputs[surface_level]['normals'] = torch.cat([surface_levels_outputs[surface_level]['normals'], img_surface_normals[idx]], dim=0)
-
+            
             # -----Processing surface levels-----
             for surface_level in surface_levels:
                 CONSOLE.print("\n========== Processing surface level", surface_level, "==========")
@@ -361,9 +367,17 @@ def extract_mesh_from_coarse_sugar(args):
                 else:
                     bg_mask = (surface_points[points_idx].abs().max(dim=-1)[0] < bg_bbox_factor * sugar.get_cameras_spatial_extent()) * ~fg_mask
 
-                fg_points = surface_points[points_idx][fg_mask]
-                fg_colors = surface_colors[points_idx][fg_mask]
-                fg_normals = surface_normals[points_idx][fg_mask]
+                # if args.object_gs:
+                if True:
+                    fg_points = surface_points[points_idx]
+                    fg_colors = surface_colors[points_idx]
+                    fg_normals = surface_normals[points_idx]
+                else:
+                    fg_points = surface_points[points_idx][fg_mask]
+                    fg_colors = surface_colors[points_idx][fg_mask]
+                    fg_normals = surface_normals[points_idx][fg_mask]
+                    
+                
 
                 bg_points = surface_points[points_idx][bg_mask]
                 bg_colors = surface_colors[points_idx][bg_mask]
@@ -380,7 +394,8 @@ def extract_mesh_from_coarse_sugar(args):
                     fg_pcd.points = o3d.utility.Vector3dVector(fg_points.double().cpu().numpy())
                     fg_pcd.colors = o3d.utility.Vector3dVector(fg_colors.double().cpu().numpy())
                     fg_pcd.normals = o3d.utility.Vector3dVector(fg_normals.double().cpu().numpy())
-
+                    
+                    o3d.io.write_point_cloud("point_cloud.ply", fg_pcd)
                     # outliers removal
                     cl, ind = fg_pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=20.)
                     CONSOLE.print("Cleaning Point Cloud...")
@@ -389,13 +404,18 @@ def extract_mesh_from_coarse_sugar(args):
                     CONSOLE.print("Finished computing points, colors and normals.")
 
                     CONSOLE.print("Now computing mesh...")
-                    o3d_fg_mesh, o3d_fg_densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
-                        fg_pcd, depth=poisson_depth) #, width=0, scale=1.1, linear_fit=False)  # depth=10 should be the default value? 11 is good to (but it starts to make a big number of triangles)
+                    if not use_alpha:
+                        o3d_fg_mesh, o3d_fg_densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+                            fg_pcd, depth=poisson_depth) #, width=0, scale=1.1, linear_fit=False)  # depth=10 should be the default value? 11 is good to (but it starts to make a big number of triangles)
+                        if vertices_density_quantile > 0.:
+                            CONSOLE.print("Removing vertices with low densities...")
+                            vertices_to_remove = o3d_fg_densities < np.quantile(o3d_fg_densities, vertices_density_quantile)
+                            o3d_fg_mesh.remove_vertices_by_mask(vertices_to_remove)
+                    else:
+                        CONSOLE.print("Computing mesh with alpha shape...")
+                        o3d_fg_mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_alpha_shape(
+                            fg_pcd, alpha_radius)
 
-                    if vertices_density_quantile > 0.:
-                        CONSOLE.print("Removing vertices with low densities...")
-                        vertices_to_remove = o3d_fg_densities < np.quantile(o3d_fg_densities, vertices_density_quantile)
-                        o3d_fg_mesh.remove_vertices_by_mask(vertices_to_remove)
                 else:
                     CONSOLE.print("\n[WARNING] Foreground is empty.")
                     o3d_fg_mesh = None
@@ -417,13 +437,18 @@ def extract_mesh_from_coarse_sugar(args):
                     CONSOLE.print("Finished computing points, colors and normals.")
 
                     CONSOLE.print("Now computing mesh...")
-                    o3d_bg_mesh, o3d_bg_densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
-                        bg_pcd, depth=poisson_depth) #, width=0, scale=1.1, linear_fit=False)  # depth=10 should be the default value? 11 is good to (but it starts to make a big number of triangles)
+                    if not use_alpha:
+                        o3d_bg_mesh, o3d_bg_densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+                            bg_pcd, depth=poisson_depth) #, width=0, scale=1.1, linear_fit=False)  # depth=10 should be the default value? 11 is good to (but it starts to make a big number of triangles)
+                        if vertices_density_quantile > 0.:
+                            CONSOLE.print("Removing vertices with low densities...")
+                            vertices_to_remove = o3d_bg_densities < np.quantile(o3d_bg_densities, vertices_density_quantile)
+                            o3d_bg_mesh.remove_vertices_by_mask(vertices_to_remove)
+                    else:
+                        CONSOLE.print("Computing mesh with alpha shape...")
+                        o3d_bg_mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_alpha_shape(
+                            bg_pcd, alpha_radius)
 
-                    if vertices_density_quantile > 0.:
-                        CONSOLE.print("Removing vertices with low densities...")
-                        vertices_to_remove = o3d_bg_densities < np.quantile(o3d_bg_densities, vertices_density_quantile)
-                        o3d_bg_mesh.remove_vertices_by_mask(vertices_to_remove)
                 else:
                     CONSOLE.print("\n[WARNING] Background is empty.")
                     o3d_bg_mesh = None
@@ -436,10 +461,18 @@ def extract_mesh_from_coarse_sugar(args):
                 CONSOLE.print("\n-----Decimating and cleaning meshes-----")
                 for decimation_target in decimation_targets:
                     CONSOLE.print("\nProcessing decimation target:", decimation_target)
-                    if decimate_mesh:
+                    decimated_o3d_fg_mesh = o3d_fg_mesh
+                    decimated_o3d_bg_mesh = o3d_bg_mesh
+                    
+                    if len(decimated_o3d_fg_mesh.vertices) < decimation_target:
+                        decimated_o3d_fg_mesh = o3d_fg_mesh.subdivide_midpoint(number_of_iterations=1)
+                    
+                    elif decimate_mesh:
+                    # if False:
                         if o3d_fg_mesh is not None:
                             CONSOLE.print("Decimating foreground mesh...")
                             decimated_o3d_fg_mesh = o3d_fg_mesh.simplify_quadric_decimation(decimation_target)
+                            # decimated_o3d_fg_mesh = o3d_fg_mesh.subdivide_midpoint(number_of_iterations=1)
                             CONSOLE.print("Finished decimating foreground mesh.")
                         else:
                             decimated_o3d_fg_mesh = None
@@ -447,11 +480,13 @@ def extract_mesh_from_coarse_sugar(args):
                         if o3d_bg_mesh is not None:                            
                             CONSOLE.print("Decimating background mesh...")
                             decimated_o3d_bg_mesh = o3d_bg_mesh.simplify_quadric_decimation(decimation_target)
+                            # decimated_o3d_bg_mesh = o3d_bg_mesh.subdivide_midpoint(number_of_iterations=1)
                             CONSOLE.print("Finished decimating background mesh.")
                         else:
                             decimated_o3d_bg_mesh = None
 
                     if clean_mesh:
+                    # if False:
                         CONSOLE.print("Cleaning mesh...")
                         if decimated_o3d_fg_mesh is not None:
                             decimated_o3d_fg_mesh.remove_duplicated_vertices()
@@ -465,6 +500,8 @@ def extract_mesh_from_coarse_sugar(args):
                             decimated_o3d_bg_mesh.remove_duplicated_triangles()
                             decimated_o3d_bg_mesh.remove_non_manifold_edges()
                     
+                    CONSOLE.print("Finished decimating and cleaning meshes.Remaining vertices:", len(decimated_o3d_fg_mesh.vertices) if decimated_o3d_fg_mesh is not None else 0)
+                    
                     if (decimated_o3d_fg_mesh is not None) and (decimated_o3d_bg_mesh is not None):
                         CONSOLE.print("Merging foreground and background meshes.")
                         decimated_o3d_mesh = decimated_o3d_fg_mesh + decimated_o3d_bg_mesh
@@ -477,8 +514,10 @@ def extract_mesh_from_coarse_sugar(args):
                     else:
                         raise ValueError("Both foreground and background meshes are empty. Please provide a valid bounding box for the scene.")
                     
+                        
                     # Project Mesh on extracted surface points for better details
                     if project_mesh_on_surface_points:
+                    # if False:
                         CONSOLE.print("Projecting mesh on surface points to recover better details...")
                         mesh_verts = torch.tensor(np.asarray(decimated_o3d_mesh.vertices), device=sugar.device, dtype=torch.float32)
                         mesh_faces = torch.tensor(np.asarray(decimated_o3d_mesh.triangles), device=sugar.device, dtype=torch.int64)
@@ -506,6 +545,54 @@ def extract_mesh_from_coarse_sugar(args):
                         decimated_o3d_mesh.remove_duplicated_triangles()
                         decimated_o3d_mesh.remove_non_manifold_edges()
                         CONSOLE.print("Projection done.")
+                        
+                        if decimated_o3d_fg_mesh is not None:
+                            CONSOLE.print("Projecting mesh on surface points to recover better details...")
+                            mesh_verts = torch.tensor(np.asarray(decimated_o3d_fg_mesh.vertices), device=sugar.device, dtype=torch.float32)
+                            mesh_faces = torch.tensor(np.asarray(decimated_o3d_fg_mesh.triangles), device=sugar.device, dtype=torch.int64)
+
+                            proj_knn_idx = knn_points(
+                                mesh_verts[None], 
+                                surface_points[None], 
+                                K=1,
+                            ).idx[0][..., 0]
+                            
+                            new_mesh_verts = surface_points[proj_knn_idx]
+                            new_mesh_faces = mesh_faces
+                            new_mesh_colors = surface_colors[proj_knn_idx]
+                            
+                            decimated_o3d_fg_mesh = o3d.geometry.TriangleMesh()
+                            decimated_o3d_fg_mesh.vertices = o3d.utility.Vector3dVector(new_mesh_verts.cpu().numpy())
+                            decimated_o3d_fg_mesh.triangles = o3d.utility.Vector3iVector(new_mesh_faces.cpu().numpy())
+                            decimated_o3d_fg_mesh.vertex_colors = o3d.utility.Vector3dVector(new_mesh_colors.cpu().numpy())
+                            decimated_o3d_fg_mesh.compute_vertex_normals()
+                            
+                            # ADDED
+                            CONSOLE.print("Cleaning projected mesh...")
+                            decimated_o3d_fg_mesh.remove_duplicated_vertices()
+                            decimated_o3d_fg_mesh.remove_degenerate_triangles()
+                            decimated_o3d_fg_mesh.remove_duplicated_triangles()
+                            decimated_o3d_fg_mesh.remove_non_manifold_edges()
+                            CONSOLE.print("Projection done.")
+                    
+                    
+                    if True:
+                        mesh = trimesh.Trimesh(
+                            vertices=np.asarray(decimated_o3d_mesh.vertices),
+                            faces=np.asarray(decimated_o3d_mesh.triangles),
+                            vertex_colors=np.asarray(decimated_o3d_mesh.vertex_colors),
+                        )
+                        mesh = trimesh.smoothing.filter_mut_dif_laplacian( mesh, iterations=20)
+                        mesh.fill_holes()
+                        
+                        
+                        # color = np.asarray(mesh.visual.vertex_colors)[:,:3]/255.
+                        # decimated_o3d_mesh = o3d.geometry.TriangleMesh(
+                        #     vertices=o3d.utility.Vector3dVector(np.asarray(mesh.vertices, dtype=np.float32)),
+                        #     triangles=o3d.utility.Vector3iVector(np.asarray(mesh.faces, dtype=np.int32)), 
+                        # )
+                        # decimated_o3d_mesh.vertex_colors = o3d.utility.Vector3dVector(color)
+                        
                     
                     if use_vanilla_3dgs:
                         sugar_mesh_path = 'sugarmesh_vanilla3dgs_levelZZ_decimAA.ply'
@@ -517,7 +604,23 @@ def extract_mesh_from_coarse_sugar(args):
                             'AA', str(decimation_target).replace('.', '')
                             )
                     sugar_mesh_path = os.path.join(mesh_output_dir, sugar_mesh_path)
+                    
+                    export = trimesh.exchange.obj.export_obj(mesh) 
+                    file_obj = open(sugar_mesh_path[:-4] + ".obj", 'wb') 
+                    trimesh.util.write_encoded(file_obj, export)
+                    CONSOLE.print("Mesh saved at", sugar_mesh_path[:-4] + ".obj")
+                    
+                    decimated_o3d_mesh = o3d.geometry.TriangleMesh(
+                        vertices=o3d.utility.Vector3dVector(np.asarray(mesh.vertices, dtype=np.float32)),
+                        triangles=o3d.utility.Vector3iVector(np.asarray(mesh.faces, dtype=np.int32)),
+                    )
+                    decimated_o3d_mesh.vertex_colors = o3d.utility.Vector3dVector(np.asarray(mesh.visual.vertex_colors)[:,:3]/255.)
+                    
+                    
                     o3d.io.write_triangle_mesh(sugar_mesh_path, decimated_o3d_mesh, write_triangle_uvs=True, write_vertex_colors=True, write_vertex_normals=True)
+                    if decimated_o3d_fg_mesh is not None:
+                        o3d.io.write_triangle_mesh(sugar_mesh_path[:-4]+'_fgmesh.ply', decimated_o3d_fg_mesh, write_triangle_uvs=True, write_vertex_colors=True, write_vertex_normals=True)
+                    
                     CONSOLE.print("Mesh saved at", sugar_mesh_path)
                     all_sugar_mesh_paths.append(sugar_mesh_path)
                     
@@ -560,8 +663,33 @@ def extract_mesh_from_coarse_sugar(args):
                 CONSOLE.print("Computing points, colors and normals...")
                 fg_pcd = o3d.geometry.PointCloud()
                 fg_pcd.points = o3d.utility.Vector3dVector(fg_points.double().cpu().numpy())
-                fg_pcd.colors = o3d.utility.Vector3dVector(fg_colors.double().cpu().numpy())
-                fg_pcd.normals = o3d.utility.Vector3dVector(fg_normals.double().cpu().numpy())
+                if not use_alpha:
+                    fg_pcd.colors = o3d.utility.Vector3dVector(fg_colors.double().cpu().numpy())
+                    fg_pcd.normals = o3d.utility.Vector3dVector(fg_normals.double().cpu().numpy())
+                
+                # o3d.io.write_point_cloud("point_cloud_gc.ply", fg_pcd)
+                
+                # fg_pcd.estimate_normals()
+                
+                # cl, ind = fg_pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=20.)
+                # fg_pcd = fg_pcd.select_by_index(ind)
+                
+                # o3d.io.write_point_cloud("point_cloud_gc_clean.ply", fg_pcd)
+    
+                # o3d_fg_mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_alpha_shape(fg_pcd, 0.1)
+                # o3d_fg_mesh.compute_vertex_normals()
+                # mesh = trimesh.Trimesh(
+                #     vertices=np.asarray(o3d_fg_mesh.vertices),
+                #     faces=np.asarray(o3d_fg_mesh.triangles),
+                #     # vertex_colors=np.asarray(o3d_fg_mesh.vertex_colors),
+                # )
+                # mesh = trimesh.smoothing.filter_mut_dif_laplacian( mesh,)
+                # mesh.fill_holes()
+                # export = trimesh.exchange.obj.export_obj(mesh) 
+                # file_obj = open("fg.obj", 'wb') 
+                # trimesh.util.write_encoded(file_obj, export)
+                
+                
 
                 # outliers removal
                 cl, ind = fg_pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=20.)
@@ -571,13 +699,31 @@ def extract_mesh_from_coarse_sugar(args):
                 CONSOLE.print("Finished computing points, colors and normals.")
 
                 CONSOLE.print("Now computing mesh...")
-                o3d_fg_mesh, o3d_fg_densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
-                    fg_pcd, depth=poisson_depth) #, width=0, scale=1.1, linear_fit=False)  # depth=10 should be the default value? 11 is good to (but it starts to make a big number of triangles)
+                if not use_alpha:
+                    o3d_fg_mesh, o3d_fg_densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+                        fg_pcd, depth=poisson_depth) #, width=0, scale=1.1, linear_fit=False)  # depth=10 should be the default value? 11 is good to (but it starts to make a big number of triangles)
 
-                if vertices_density_quantile > 0.:
-                    CONSOLE.print("Removing vertices with low densities...")
-                    vertices_to_remove = o3d_fg_densities < np.quantile(o3d_fg_densities, vertices_density_quantile)
-                    o3d_fg_mesh.remove_vertices_by_mask(vertices_to_remove)
+                    if vertices_density_quantile > 0.:
+                        CONSOLE.print("Removing vertices with low densities...")
+                        vertices_to_remove = o3d_fg_densities < np.quantile(o3d_fg_densities, vertices_density_quantile)
+                        o3d_fg_mesh.remove_vertices_by_mask(vertices_to_remove)
+                else:
+                    CONSOLE.print("Computing mesh with alpha shape...")
+                    fg_pcd.estimate_normals()
+                    o3d_fg_mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_alpha_shape(
+                        fg_pcd, 0.08)
+                    o3d_fg_mesh.compute_vertex_normals()
+                    mesh = trimesh.Trimesh(
+                        vertices=np.asarray(o3d_fg_mesh.vertices),
+                        faces=np.asarray(o3d_fg_mesh.triangles),
+                        vertex_colors=np.asarray(o3d_fg_mesh.vertex_colors),
+                    )
+                    mesh = trimesh.smoothing.filter_mut_dif_laplacian( mesh,)
+                    mesh.fill_holes()
+                    export = trimesh.exchange.obj.export_obj(mesh) 
+                    file_obj = open("fg.obj", 'wb') 
+                    trimesh.util.write_encoded(file_obj, export)
+                    
                 
                 # ---Compute background mesh---
                 if bg_points.shape[0] > 0:
@@ -614,6 +760,9 @@ def extract_mesh_from_coarse_sugar(args):
                 CONSOLE.print("\n-----Decimating and cleaning meshes-----")
                 for decimation_target in decimation_targets:
                     CONSOLE.print("\nProcessing decimation target:", decimation_target)
+                    decimated_o3d_bg_mesh = o3d_bg_mesh
+                    decimated_o3d_fg_mesh = o3d_fg_mesh
+                    
                     if decimate_mesh:
                         CONSOLE.print("Decimating foreground mesh...")
                         decimated_o3d_fg_mesh = o3d_fg_mesh.simplify_quadric_decimation(decimation_target)

@@ -29,6 +29,8 @@ class CameraInfo(NamedTuple):
     T: np.array
     FovY: np.array
     FovX: np.array
+    cx: np.array
+    cy: np.array
     image: np.array
     image_path: str
     image_name: str
@@ -104,11 +106,77 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
     sys.stdout.write('\n')
     return cam_infos
 
+def readJsonCameras(json_path, images_folder):
+    """
+    Read camera information from a JSON file and return a list of CameraInfo objects.
+    
+    Args:
+        json_path (str): Path to the JSON file containing camera parameters
+        images_folder (str): Path to the folder containing the images
+        
+    Returns:
+        list: List of CameraInfo objects
+    """
+
+    # Read JSON file
+    with open(json_path, 'r') as f:
+        cameras_data = json.load(f)
+    
+    cam_infos = []
+    for idx, cam_data in enumerate(cameras_data):
+        sys.stdout.write('\r')
+        sys.stdout.write("Reading camera {}/{}".format(idx+1, len(cameras_data)))
+        sys.stdout.flush()
+
+        # Extract camera parameters
+        uid = cam_data['id']
+        width = cam_data['width']
+        height = cam_data['height']
+        
+        # Calculate FoV from focal length
+        focal_length_x = cam_data['fx']
+        focal_length_y = cam_data['fy']
+        cx = cam_data['cx']
+        cy = cam_data['cy']
+        FovY = focal2fov(focal_length_y, height)
+        FovX = focal2fov(focal_length_x, width)
+        
+        # Get rotation and translation
+        R = np.array(cam_data['rotation'])
+        T = np.array(cam_data['position'])
+        
+        # Handle image path
+        image_name = cam_data['img_name']
+        image_path = os.path.join(images_folder, f"{image_name}.png")  # Adjust extension if needed
+        image = Image.open(image_path)
+        
+        cx = (cx - width / 2) / width * 2
+        cy = (cy - height / 2) / height * 2
+        
+        cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, cy=cy, cx=cx,image=image,
+                            image_path=image_path, image_name=image_name, 
+                            width=width, height=height)
+        cam_infos.append(cam_info)
+    
+    sys.stdout.write('\n')
+    return cam_infos
+
 def fetchPly(path):
     plydata = PlyData.read(path)
     vertices = plydata['vertex']
     positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
     colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
+    normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    return BasicPointCloud(points=positions, colors=colors, normals=normals)
+
+def fetchPly_DiGOutput(path):
+    plydata = PlyData.read(path)
+    vertices = plydata['vertex']
+    positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
+    try:
+        colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
+    except:
+        colors = np.ones_like(positions)
     normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
     return BasicPointCloud(points=positions, colors=colors, normals=normals)
 
@@ -254,7 +322,39 @@ def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
                            ply_path=ply_path)
     return scene_info
 
+
+def readDiGOutputSyntheticInfo(path, images, eval, llffhold=8):
+    cameras_file = os.path.join(path, "cameras.json")
+    reading_dir = "images" if images == None else images
+    cam_infos_unsorted = readJsonCameras(cameras_file, images_folder=os.path.join(path, reading_dir))
+    cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
+
+    if eval:
+        train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
+        test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
+    else:
+        train_cam_infos = cam_infos
+        test_cam_infos = []
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+    ply_path = os.path.join(path, "point_cloud.ply")
+    
+    try:
+        pcd = fetchPly_DiGOutput(ply_path)
+    except:
+        pcd = None
+
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=ply_path)
+    return scene_info
+
+
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
-    "Blender" : readNerfSyntheticInfo
+    "Blender" : readNerfSyntheticInfo,
+    "DiGOutput": readDiGOutputSyntheticInfo
 }

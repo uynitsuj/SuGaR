@@ -30,10 +30,15 @@ def load_gs_cameras(source_path, gs_output_path, image_resolution=1,
         List of GSCameras: List of Gaussian Splatting cameras.
     """
     image_dir = os.path.join(source_path, 'images')
+    masks_dir = os.path.join(source_path, 'masks')
+    if os.path.exists(masks_dir):
+        load_masks = True
+    else:
+        load_masks = False
     
     with open(gs_output_path + 'cameras.json') as f:
         unsorted_camera_transforms = json.load(f)
-        
+    
     # Remove indices
     if len(remove_indices) > 0:
         print("Removing cameras with indices:", remove_indices, sep="\n")
@@ -91,11 +96,15 @@ def load_gs_cameras(source_path, gs_output_path, image_resolution=1,
         fx = camera_transform['fx']
         fov_y = focal2fov(fy, height)
         fov_x = focal2fov(fx, width)
+
+        cx = camera_transform['cx'] if 'cx' in list(camera_transform.keys()) else None
+        cy = camera_transform['cy'] if 'cy' in list(camera_transform.keys()) else None
         
         # GT data
         id = camera_transform['id']
         name = camera_transform['img_name']
         image_path = os.path.join(image_dir,  name + extension)
+        mask_path = os.path.join(masks_dir, name + '.jpg.png')
         
         if load_gt_images:
             image = Image.open(image_path)
@@ -117,9 +126,17 @@ def load_gs_cameras(source_path, gs_output_path, image_resolution=1,
             resized_image_rgb = PILtoTorch(image, resolution)
             gt_image = resized_image_rgb[:3, ...]
             
+            if load_masks:
+                mask = Image.open(mask_path)
+                mask = PILtoTorch(mask, resolution)
+                gt_mask = mask[0, ...]
+            else:
+                gt_mask = None
+                
             image_height, image_width = None, None
         else:
             gt_image = None
+            gt_mask = None
             if image_resolution in [1, 2, 4, 8]:
                 downscale_factor = image_resolution
                 # resolution = round(orig_w/(image_resolution)), round(orig_h/(image_resolution))
@@ -129,10 +146,10 @@ def load_gs_cameras(source_path, gs_output_path, image_resolution=1,
             image_height, image_width = round(height/downscale_factor), round(width/downscale_factor)
         
         gs_camera = GSCamera(
-            colmap_id=id, image=gt_image, gt_alpha_mask=None,
+            colmap_id=id, image=gt_image, gt_alpha_mask=gt_mask,
             R=R, T=T, FoVx=fov_x, FoVy=fov_y,
             image_name=name, uid=id,
-            image_height=image_height, image_width=image_width,)
+            image_height=image_height, image_width=image_width, cx =cx, cy = cy)
         
         cam_list.append(gs_camera)
 
@@ -145,7 +162,7 @@ class GSCamera(torch.nn.Module):
     def __init__(self, colmap_id, R, T, FoVx, FoVy, image, gt_alpha_mask,
                  image_name, uid,
                  trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda",
-                 image_height=None, image_width=None,
+                 image_height=None, image_width=None, cx = None, cy = None
                  ):
         """
         Args:
@@ -176,6 +193,8 @@ class GSCamera(torch.nn.Module):
         self.FoVx = FoVx
         self.FoVy = FoVy
         self.image_name = image_name
+        self.cx = cx
+        self.cy = cy
 
         try:
             self.data_device = torch.device(data_device)
@@ -205,6 +224,8 @@ class GSCamera(torch.nn.Module):
 
         self.trans = trans
         self.scale = scale
+        
+        self.gt_alpha_mask = gt_alpha_mask
 
         self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).cuda()
         self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).cuda()
@@ -424,6 +445,7 @@ class CamerasWrapper:
         gs_cameras,
         p3d_cameras=None,
         p3d_cameras_computed=False,
+        c2w_input=None,
     ) -> None:
         """
         Args:
@@ -451,8 +473,17 @@ class CamerasWrapper:
         self.fy = torch.Tensor(np.array([fov2focal(gs_camera.FoVy, gs_camera.image_height) for gs_camera in gs_cameras])).to(device)
         self.height = torch.tensor(np.array([gs_camera.image_height for gs_camera in gs_cameras]), dtype=torch.int).to(device)
         self.width = torch.tensor(np.array([gs_camera.image_width for gs_camera in gs_cameras]), dtype=torch.int).to(device)
-        self.cx = self.width / 2.  # torch.zeros_like(fx).to(device)
-        self.cy = self.height / 2.  # torch.zeros_like(fy).to(device)
+        # self.cx = self.width / 2.  # torch.zeros_like(fx).to(device)
+        # self.cy = self.height / 2.  # torch.zeros_like(fy).to(device)
+        if gs_cameras[0].cx is not None:
+            self.cx = gs_cameras[0].cx
+        else:
+            self.cx = self.width / 2.
+        
+        if gs_cameras[0].cy is not None:
+            self.cy = gs_cameras[0].cy
+        else:
+            self.cy = self.height / 2. 
         
         w2c = torch.zeros(N, 4, 4).to(device)
         w2c[:, :3, :3] = R.transpose(-1, -2)
@@ -463,6 +494,8 @@ class CamerasWrapper:
         c2w[:, :3, 1:3] *= -1
         c2w = c2w[:, :3, :]
         self.camera_to_worlds = c2w
+        if c2w_input is not None:
+            self.camera_to_worlds = torch.tensor(c2w_input,device=device)   
 
     @classmethod
     def from_p3d_cameras(

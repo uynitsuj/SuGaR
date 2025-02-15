@@ -24,14 +24,14 @@ if __name__ == "__main__":
                         'Else, skips the vanilla Gaussian Splatting optimization and use the checkpoint in the provided directory.')
     
     # Regularization for coarse SuGaR
-    parser.add_argument('-r', '--regularization_type', type=str,
+    parser.add_argument('-r', '--regularization_type', type=str, default='dn_consistency',
                         help='(Required) Type of regularization to use for coarse SuGaR. Can be "sdf", "density" or "dn_consistency". ' 
                         'We recommend using "dn_consistency" for the best mesh quality.')
     
     # Extract mesh
     parser.add_argument('-l', '--surface_level', type=float, default=0.3, 
                         help='Surface level to extract the mesh at. Default is 0.3')
-    parser.add_argument('-v', '--n_vertices_in_mesh', type=int, default=1_000_000, 
+    parser.add_argument('-v', '--n_vertices_in_mesh', type=int, default=500_000, 
                         help='Number of vertices in the extracted mesh.')
     parser.add_argument('--project_mesh_on_surface_points', type=str2bool, default=True, 
                         help='If True, project the mesh on the surface points for better details.')
@@ -43,7 +43,7 @@ if __name__ == "__main__":
                         help='If True, center the bbox. Default is False.')
     
     # Parameters for refined SuGaR
-    parser.add_argument('-g', '--gaussians_per_triangle', type=int, default=1, 
+    parser.add_argument('-g', '--gaussians_per_triangle', type=int, default=6, 
                         help='Number of gaussians per triangle.')
     parser.add_argument('-f', '--refinement_iterations', type=int, default=15_000, 
                         help='Number of refinement iterations.')
@@ -54,7 +54,7 @@ if __name__ == "__main__":
                         'Computing a traditional colored UV texture should take less than 10 minutes.')
     parser.add_argument('--square_size',
                         default=8, type=int, help='Size of the square to use for the UV texture.')
-    parser.add_argument('--postprocess_mesh', type=str2bool, default=False, 
+    parser.add_argument('--postprocess_mesh', type=str2bool, default=True, 
                         help='If True, postprocess the mesh by removing border triangles with low-density. '
                         'This step takes a few minutes and is not needed in general, as it can also be risky. '
                         'However, it increases the quality of the mesh in some cases, especially when an object is visible only from one side.')
@@ -69,11 +69,11 @@ if __name__ == "__main__":
                         'This file can be large (+/- 500MB), but is needed for using the dedicated viewer. Default is True.')
     
     # (Optional) Default configurations
-    parser.add_argument('--low_poly', type=str2bool, default=False, 
+    parser.add_argument('--low_poly', type=str2bool, default=True, 
                         help='Use standard config for a low poly mesh, with 200k vertices and 6 Gaussians per triangle.')
     parser.add_argument('--high_poly', type=str2bool, default=False,
                         help='Use standard config for a high poly mesh, with 1M vertices and 1 Gaussians per triangle.')
-    parser.add_argument('--refinement_time', type=str, default=None, 
+    parser.add_argument('--refinement_time', type=str, default='long', 
                         help="Default configs for time to spend on refinement. Can be 'short', 'medium' or 'long'.")
       
     # Evaluation split

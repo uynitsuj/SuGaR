@@ -13,6 +13,8 @@ from sugar_utils.loss_utils import ssim, l1_loss, l2_loss
 from rich.console import Console
 import time
 
+import matplotlib.pyplot as plt
+
 
 def depths_to_points(view, depthmap):
     """Comes from 2DGS.
@@ -61,7 +63,8 @@ def depth_normal_consistency_loss(
     normal:torch.Tensor,
     camera,
     scale_rendered_normals=False,
-    return_normal_maps=False
+    return_normal_maps=False,
+    mask = None
 ):
     """_summary_
 
@@ -89,6 +92,9 @@ def depth_normal_consistency_loss(
 
     # Compute the error between the normals from the depth map and the rendered normals.    
     normal_error = (1 - (normal_view * normal_from_depth).sum(dim=0))
+    
+    if mask is not None:
+        normal_error = normal_error * mask
     
     if return_normal_maps:
         return normal_error, normal_view, normal_from_depth    
@@ -135,8 +141,9 @@ def coarse_training_with_density_regularization_and_dn_consistency(args):
     # -----Optimization parameters-----
 
     # Learning rates and scheduling
-    num_iterations = 15_000  # Changed
-
+    # num_iterations = 15_000  # Changed
+    num_iterations = 7_000  # Changed
+    
     spatial_lr_scale = None
     position_lr_init=0.00016
     position_lr_final=0.0000016
@@ -545,8 +552,8 @@ def coarse_training_with_density_regularization_and_dn_consistency(args):
     elif loss_function == 'l2':
         loss_fn = l2_loss
     elif loss_function == 'l1+dssim':
-        def loss_fn(pred_rgb, gt_rgb):
-            return (1.0 - dssim_factor) * l1_loss(pred_rgb, gt_rgb) + dssim_factor * (1.0 - ssim(pred_rgb, gt_rgb))
+        def loss_fn(pred_rgb, gt_rgb, mask=None):
+            return (1.0 - dssim_factor) * l1_loss(pred_rgb, gt_rgb, mask=mask) + dssim_factor * (1.0 - ssim(pred_rgb, gt_rgb, mask=mask))
     CONSOLE.print(f'Using loss function: {loss_function}')
     
     
@@ -559,6 +566,7 @@ def coarse_training_with_density_regularization_and_dn_consistency(args):
     
     if initialize_from_trained_3dgs:
         iteration = 7000 - 1
+        # iteration = num_iterations - 1
     
     for batch in range(9_999_999):
         if iteration >= num_iterations:
@@ -625,7 +633,26 @@ def coarse_training_with_density_regularization_and_dn_consistency(args):
                 gt_rgb = gt_rgb.transpose(-1, -2).transpose(-2, -3)
                     
                 # Compute loss 
-                loss = loss_fn(pred_rgb, gt_rgb)
+                gt_mask = nerfmodel.cam_list[camera_indices].gt_alpha_mask
+                if gt_mask is not None:
+                    mask = gt_mask.to(device)
+                else:
+                    mask = None
+                
+                loss = loss_fn(pred_rgb, gt_rgb, mask)
+                
+                # import pdb;pdb.set_trace()
+                if iteration % 1000 == 0:
+                    CONSOLE.print(f'Iteration {iteration}: Loss: {loss.item()}')
+                    plt.imshow(pred_rgb[0].detach().cpu().numpy().transpose(1, 2, 0))
+                    plt.savefig('pred_rgb.png')
+                    plt.imshow(gt_rgb[0].detach().cpu().numpy().transpose(1, 2, 0))
+                    plt.savefig('gt_rgb.png')
+                    #plot the overlap of the two images
+                    plt.imshow(0.5 * pred_rgb[0].detach().cpu().numpy().transpose(1, 2, 0) + 0.5 *gt_rgb[0].detach().cpu().numpy().transpose(1, 2, 0))
+                    plt.savefig(f'overlap_{iteration}_.png')
+                    # import pdb;pdb.set_trace()
+
                         
                 if enforce_entropy_regularization and iteration > start_entropy_regularization_from and iteration < end_entropy_regularization_at:
                     if iteration == start_entropy_regularization_from + 1:
@@ -637,6 +664,7 @@ def coarse_training_with_density_regularization_and_dn_consistency(args):
                         vis_opacities = opacities[visibility_filter]
                     else:
                         vis_opacities = opacities
+                    
                     loss = loss + entropy_regularization_factor * (
                         - vis_opacities * torch.log(vis_opacities + 1e-10)
                         - (1 - vis_opacities) * torch.log(1 - vis_opacities + 1e-10)
@@ -647,12 +675,17 @@ def coarse_training_with_density_regularization_and_dn_consistency(args):
                     if iteration == start_dn_consistency_from + 1:
                         CONSOLE.print("\n---INFO---\nStarting depth-normal consistency.")
                     depth_img, normal_img = sugar.render_depth_and_normal(camera_indices=camera_indices.item())
+                    if mask is not None:
+                        depth_img = depth_img * mask
+                        normal_img = normal_img * mask[...,None]
+                        
                     normal_error = depth_normal_consistency_loss(
                         depth=depth_img[None],  # Shape is (1, height, width) 
                         normal=normal_img.permute(2, 0, 1),  # Shape is (3, height, width)
                         camera=nerfmodel.training_cameras.gs_cameras[camera_indices.item()],
                         scale_rendered_normals=False,
                         return_normal_maps=False,
+                        mask=mask,
                     )
                     loss = loss + dn_consistency_factor * normal_error
                 
@@ -687,6 +720,8 @@ def coarse_training_with_density_regularization_and_dn_consistency(args):
                                     # Render a depth map using gaussian splatting
                                     if backpropagate_gradients_through_depth:                                
                                         point_depth = fov_camera.get_world_to_view_transform().transform_points(sugar.points)[..., 2:].expand(-1, 3)
+                                        if mask is not None:
+                                            point_depth = point_depth * mask
                                         max_depth = point_depth.max()
                                         depth = sugar.render_image_gaussian_rasterizer(
                                                     camera_indices=camera_indices.item(),
@@ -701,6 +736,8 @@ def coarse_training_with_density_regularization_and_dn_consistency(args):
                                     else:
                                         with torch.no_grad():
                                             point_depth = fov_camera.get_world_to_view_transform().transform_points(sugar.points)[..., 2:].expand(-1, 3)
+                                            if mask is not None:
+                                                point_depth = point_depth * mask
                                             max_depth = point_depth.max()
                                             depth = sugar.render_image_gaussian_rasterizer(
                                                         camera_indices=camera_indices.item(),
@@ -712,7 +749,9 @@ def coarse_training_with_density_regularization_and_dn_consistency(args):
                                                         use_same_scale_in_all_directions=False,
                                                         point_colors=point_depth,
                                                     )[..., 0]
-                                
+
+                                    if mask is not None:
+                                        depth = depth * mask
                                 # If needed, compute which gaussians are close to the surface in the depth map.
                                 # Then, we sample points only in these gaussians.
                                 # TODO: Compute projections only for gaussians in visibility filter.
@@ -857,7 +896,10 @@ def coarse_training_with_density_regularization_and_dn_consistency(args):
                     gaussian_densifier.update_densification_stats(viewspace_points, radii, visibility_filter=radii>0)
 
                     if iteration > densify_from_iter and iteration % densification_interval == 0:
-                        size_threshold = gaussian_densifier.max_screen_size if iteration > opacity_reset_interval else None
+                        # size_threshold = gaussian_densifier.max_screen_size if iteration > opacity_reset_interval else None
+                        size_threshold = 1 if iteration > opacity_reset_interval else None
+                        
+                        prune_opacity_threshold = 0.7
                         gaussian_densifier.densify_and_prune(densify_grad_threshold, prune_opacity_threshold, 
                                                     cameras_spatial_extent, size_threshold)
                         CONSOLE.print("Gaussians densified and pruned. New number of gaussians:", len(sugar.points))

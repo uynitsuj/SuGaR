@@ -161,9 +161,9 @@ class GaussianSplattingWrapper:
         self.gaussians = GaussianModel(self.model_params.sh_degree)
         self.gaussians.load_ply(
             os.path.join(
-                output_path,
-                "point_cloud",
-                "iteration_" + str(iteration_to_load),
+                source_path,
+                # "point_cloud",
+                # "iteration_" + str(iteration_to_load),
                 "point_cloud.ply"
                 )
             )

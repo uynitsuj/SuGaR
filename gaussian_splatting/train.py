@@ -89,8 +89,23 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
-        Ll1 = l1_loss(image, gt_image)
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+        if viewpoint_cam.gt_alpha_mask is not None:
+            mask = viewpoint_cam.gt_alpha_mask.cuda()
+        else:
+            mask = None
+            
+        Ll1 = l1_loss(image, gt_image, mask = mask)
+        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image, mask = mask))
+        
+        if iteration % 1000 == 0:
+            import matplotlib.pyplot as plt
+            plt.imshow(image.cpu().detach().numpy().transpose(1, 2, 0))
+            plt.savefig("image.png")
+            plt.imshow(gt_image.cpu().detach().numpy().transpose(1, 2, 0))
+            plt.savefig("gt_image.png")
+            plt.imshow(mask[0].cpu().detach().numpy())
+            plt.savefig("mask.png")
+            
         loss.backward()
 
         iter_end.record()
