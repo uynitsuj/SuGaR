@@ -661,7 +661,7 @@ def coarse_training_with_density_regularization_and_dn_consistency(args):
                         CONSOLE.print("\n---INFO---\nStopping entropy regularization.")
                     visibility_filter = radii > 0
                     if visibility_filter is not None:
-                        vis_opacities = opacities[visibility_filter]
+                        vis_opacities = opacities[visibility_filter.squeeze(0)]
                     else:
                         vis_opacities = opacities
                     
@@ -701,7 +701,7 @@ def coarse_training_with_density_regularization_and_dn_consistency(args):
                             sugar.reset_neighbors()
                         neighbor_idx = sugar.get_neighbors_of_random_points(num_samples=regularity_samples,)  # TODO: REMOVE THIS PART
                         if visibility_filter is not None:
-                            neighbor_idx = neighbor_idx[visibility_filter]  # TODO: Error here
+                            neighbor_idx = neighbor_idx[visibility_filter.squeeze(0)]  # TODO: Error here
 
                         if regularize_sdf and iteration > start_sdf_regularization_from:
                             if iteration == start_sdf_regularization_from + 1:

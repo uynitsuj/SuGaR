@@ -108,28 +108,28 @@ if __name__ == "__main__":
         print('Will export a ply file with the refined 3D Gaussians at the end of the training.')
         
     # Output directory for the vanilla 3DGS checkpoint
-    if args.gs_output_dir is None:
-        sep = os.path.sep
-        if len(args.scene_path.split(sep)[-1]) > 0:
-            gs_checkpoint_dir = os.path.join("output", "vanilla_gs", args.scene_path.split(sep)[-1])
-        else:
-            gs_checkpoint_dir = os.path.join("output", "vanilla_gs", args.scene_path.split(sep)[-2])
-        gs_checkpoint_dir = gs_checkpoint_dir + sep
+    # if args.gs_output_dir is None:
+    #     sep = os.path.sep
+    #     if len(args.scene_path.split(sep)[-1]) > 0:
+    #         gs_checkpoint_dir = os.path.join("output", "vanilla_gs", args.scene_path.split(sep)[-1])
+    #     else:
+    #         gs_checkpoint_dir = os.path.join("output", "vanilla_gs", args.scene_path.split(sep)[-2])
+    #     gs_checkpoint_dir = gs_checkpoint_dir + sep
 
-        # Trains a 3DGS scene for 7k iterations
-        white_background_str = '-w ' if args.white_background else ''
-        os.system(
-            f"CUDA_VISIBLE_DEVICES={args.gpu} python ./gaussian_splatting/train.py \
-                -s {args.scene_path} \
-                -m {gs_checkpoint_dir} \
-                {white_background_str}\
-                --iterations 7_000"
-        )
-    else:
-        print("A vanilla 3DGS checkpoint was provided. Skipping the vanilla 3DGS optimization.")
-        gs_checkpoint_dir = args.gs_output_dir
-        if gs_checkpoint_dir[-1] != os.path.sep:
-            gs_checkpoint_dir += os.path.sep
+    #     # Trains a 3DGS scene for 7k iterations
+    #     white_background_str = '-w ' if args.white_background else ''
+    #     os.system(
+    #         f"CUDA_VISIBLE_DEVICES={args.gpu} python ./gaussian_splatting/train.py \
+    #             -s {args.scene_path} \
+    #             -m {gs_checkpoint_dir} \
+    #             {white_background_str}\
+    #             --iterations 7_000"
+    #     )
+    # else:
+    print("A vanilla 3DGS checkpoint was provided. Skipping the vanilla 3DGS optimization.")
+    gs_checkpoint_dir = args.scene_path
+    if gs_checkpoint_dir[-1] != os.path.sep:
+        gs_checkpoint_dir += os.path.sep
     
     # Runs the train.py python script with the given arguments
     os.system(

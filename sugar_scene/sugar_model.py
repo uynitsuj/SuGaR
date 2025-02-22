@@ -938,7 +938,7 @@ class SuGaR(nn.Module):
         if mask is None:
             scaling = self.scaling
         else:
-            scaling = self.scaling[mask]
+            scaling = self.scaling[mask.squeeze(0)]
         
         if probabilities_proportional_to_volume:
             areas = scaling[..., 0] * scaling[..., 1] * scaling[..., 2]
@@ -956,7 +956,7 @@ class SuGaR(nn.Module):
         
         random_indices = torch.multinomial(cum_probs, num_samples=num_samples, replacement=True)
         if mask is not None:
-            valid_indices = torch.arange(self.n_points, device=self.device)[mask]
+            valid_indices = torch.arange(self.n_points, device=self.device)[mask.squeeze(0)]
             random_indices = valid_indices[random_indices]
         
         random_points = self.points[random_indices] + quaternion_apply(

@@ -41,8 +41,8 @@ def extract_mesh_from_coarse_sugar(args):
     # Mesh computation parameters
     fg_bbox_factor = 1.  # 1.
     bg_bbox_factor = 4.  # 4.
-    poisson_depth = 10  # 10 for most real scenes. 6 or 7 work well for most synthetic scenes
-    vertices_density_quantile = 0.1  # 0.1 for most real scenes. 0. works well for most synthetic scenes
+    poisson_depth = 7  # 10 for most real scenes. 6 or 7 work well for most synthetic scenes
+    vertices_density_quantile = 0  # 0.1 for most real scenes. 0. works well for most synthetic scenes
     decimate_mesh = True
     clean_mesh = True
     project_mesh_on_surface_points = args.project_mesh_on_surface_points
@@ -407,6 +407,10 @@ def extract_mesh_from_coarse_sugar(args):
                     if not use_alpha:
                         o3d_fg_mesh, o3d_fg_densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
                             fg_pcd, depth=poisson_depth) #, width=0, scale=1.1, linear_fit=False)  # depth=10 should be the default value? 11 is good to (but it starts to make a big number of triangles)
+                        # import viser
+                        # server = viser.Server()
+                        # server.scene.add_mesh_trimesh('mesh', o3d_fg_mesh)
+                        # import pdb; pdb.set_trace()
                         if vertices_density_quantile > 0.:
                             CONSOLE.print("Removing vertices with low densities...")
                             vertices_to_remove = o3d_fg_densities < np.quantile(o3d_fg_densities, vertices_density_quantile)
