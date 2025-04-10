@@ -311,7 +311,6 @@ def extract_mesh_from_coarse_sugar(args):
                                 return_normals=True,
                                 compute_flat_normals=flat_surface_level_normals,
                                 use_gaussian_depth=use_gaussian_depth_for_surface_levels,)
-                        
                         for surface_level in surface_levels:
                             img_surface_points = frame_surface_level_outputs[surface_level]['intersection_points']
                             surface_gaussian_idx = frame_surface_level_outputs[surface_level]['gaussian_idx']

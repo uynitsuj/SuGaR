@@ -11,7 +11,7 @@
 
 import torch
 import math
-from .rasterization import GaussianRasterizationSettings, GaussianRasterizer
+from .rasterization2dgs import GaussianRasterizationSettings, GaussianRasterizer
 # from .detailed_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 from .utils import eval_sh
 

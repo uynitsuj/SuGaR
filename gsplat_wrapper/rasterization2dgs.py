@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from gsplat.rendering import rasterization, rasterization_2dgs
+from gsplat.rendering import rasterization_2dgs
 from .utils import fov2focal, SH2RGB
 import math
 
@@ -61,7 +61,6 @@ class GaussianRasterizer(nn.Module):
     def __init__(self, raster_settings):
         super(GaussianRasterizer, self).__init__()
         self.raster_settings = raster_settings
-        self.twodgs = False
         
         self.image_height = raster_settings.image_height
         self.image_width = raster_settings.image_width
@@ -101,52 +100,28 @@ class GaussianRasterizer(nn.Module):
             sh_degree = None
         
         
-        
-        if self.twodgs:
-            render_colors, render_alphas, normals, normals_from_depth, render_distort, render_median, info = rasterization_2dgs(
-                means=means3D,
-                quats=rotations / rotations.norm(dim=-1, keepdim=True),
-                scales=scales,
-                opacities=opacities[..., 0] if len(opacities.shape)>1 else opacities,
-                colors=shs if colors_precomp is None else colors_precomp,
-                sh_degree=sh_degree,
-                viewmats=self.viewmatrix,
-                Ks=self.K,
-                width=self.image_width,
-                height=self.image_height,
-                backgrounds=self.bg,
-                near_plane=0.01,  # TODO
-                far_plane=1e10,  # TODO
-                # eps2d=0.3,
-                render_mode='RGB',  # 'RGB', 'D', 'ED', 'RGB+D', 'RGB+ED'
-                # packed=False,
-                absgrad=False,
-                sparse_grad=False,
-                # rasterize_mode='classic',  # 'classic', 'antialiased'
-            )
-        else:
-            render_colors, render_alphas, info = rasterization(
-                means=means3D,
-                quats=rotations,
-                scales=scales,
-                opacities=opacities[..., 0] if len(opacities.shape)>1 else opacities,
-                colors=shs if colors_precomp is None else colors_precomp,
-                sh_degree=sh_degree,
-                viewmats=self.viewmatrix,
-                Ks=self.K,
-                width=self.image_width,
-                height=self.image_height,
-                backgrounds=self.bg,
-                near_plane=0.01,  # TODO
-                far_plane=1e10,  # TODO
-                # eps2d=0.3,
-                render_mode='RGB',  # 'RGB', 'D', 'ED', 'RGB+D', 'RGB+ED'
-                packed=False,
-                absgrad=False,
-                sparse_grad=False,
-                rasterize_mode='classic',  # 'classic', 'antialiased'
-            )
-        
+        render_colors, render_alphas, normals, normals_from_depth, render_distort, render_median, info = rasterization_2dgs(
+            means=means3D,
+            quats=rotations / rotations.norm(dim=-1, keepdim=True),
+            scales=torch.exp(scales),
+            opacities=torch.sigmoid(opacities),
+            colors=shs if colors_precomp is None else colors_precomp,
+            sh_degree=sh_degree,
+            viewmats=self.viewmatrix,
+            Ks=self.K,
+            width=self.image_width,
+            height=self.image_height,
+            backgrounds=self.bg,
+            near_plane=0.01,  # TODO
+            far_plane=1e10,  # TODO
+            # eps2d=0.3,
+            render_mode='RGB',  # 'RGB', 'D', 'ED', 'RGB+D', 'RGB+ED'
+            # packed=False,
+            absgrad=False,
+            sparse_grad=False,
+            # rasterize_mode='classic',  # 'classic', 'antialiased'
+        )
+        # import pdb; pdb.set_trace()
         rendered_image = render_colors[0].permute(2, 0, 1)  # [3, 1080, 1920]
         radii = info['radii']
         _means2d = info['means2d']
