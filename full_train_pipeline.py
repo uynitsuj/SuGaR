@@ -1,6 +1,7 @@
 import os
 import argparse
 from sugar_utils.general_utils import str2bool
+import sys
 
 
 class AttrDict(dict):
@@ -132,8 +133,17 @@ if __name__ == "__main__":
         gs_checkpoint_dir += os.path.sep
     
     # Runs the train.py python script with the given arguments
+    cwd = os.getcwd()
+    current_file_path = os.path.abspath(__file__)
+    current_directory = os.path.dirname(current_file_path)
+    os.chdir(current_directory)
+    
+    python_executable = sys.executable
+    print(f"Python executable: {python_executable}")
+
+
     os.system(
-        f"python train.py \
+        f"python {current_directory}/train.py \
             -s {args.scene_path} \
             -c {gs_checkpoint_dir} \
             -i 7_000 \
@@ -159,3 +169,4 @@ if __name__ == "__main__":
             --gpu {args.gpu} \
             --white_background {args.white_background}"
     )
+    os.chdir(cwd)

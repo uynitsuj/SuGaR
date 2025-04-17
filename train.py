@@ -83,7 +83,7 @@ if __name__ == "__main__":
                         help="Default configs for time to spend on refinement. Can be 'short', 'medium' or 'long'.")
       
     # Evaluation split
-    parser.add_argument('--eval', type=str2bool, default=True, help='Use eval split.')
+    parser.add_argument('--eval', type=str2bool, default=False, help='Use eval split.')
 
     # GPU
     parser.add_argument('--gpu', type=int, default=0, help='Index of GPU device to use.')
@@ -134,6 +134,7 @@ if __name__ == "__main__":
     else:
         raise ValueError(f'Unknown regularization type: {args.regularization_type}')
     
+    print("Scene path: ", args.scene_path)
     
     # ----- Extract mesh from coarse SuGaR -----
     coarse_mesh_args = AttrDict({
@@ -144,7 +145,7 @@ if __name__ == "__main__":
         'surface_level': args.surface_level,
         'decimation_target': args.n_vertices_in_mesh,
         'project_mesh_on_surface_points': args.project_mesh_on_surface_points,
-        'mesh_output_dir': None,
+        'mesh_output_dir': args.scene_path + '/coarse_mesh',
         'bboxmin': args.bboxmin,
         'bboxmax': args.bboxmax,
         'center_bbox': args.center_bbox,
@@ -162,7 +163,7 @@ if __name__ == "__main__":
         'scene_path': args.scene_path,
         'checkpoint_path': args.checkpoint_path,
         'mesh_path': coarse_mesh_path,      
-        'output_dir': None,
+        'output_dir': args.scene_path+ '/refined',
         'iteration_to_load': args.iteration_to_load,
         'normal_consistency_factor': 0.1,    
         'gaussians_per_triangle': args.gaussians_per_triangle,        
@@ -185,7 +186,7 @@ if __name__ == "__main__":
             'iteration_to_load': args.iteration_to_load,
             'checkpoint_path': args.checkpoint_path,
             'refined_model_path': refined_sugar_path,
-            'mesh_output_dir': None,
+            'mesh_output_dir': args.scene_path,
             'n_gaussians_per_surface_triangle': args.gaussians_per_triangle,
             'square_size': args.square_size,
             'eval': args.eval,

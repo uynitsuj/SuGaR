@@ -1,7 +1,10 @@
-import os
+
 import numpy as np
 import torch
 import open3d as o3d
+import sys
+python_executable = sys.executable
+print(f"Python executable: {python_executable}")
 from pytorch3d.loss import mesh_laplacian_smoothing, mesh_normal_consistency
 from pytorch3d.transforms import quaternion_apply, quaternion_invert
 from sugar_scene.gs_model import GaussianSplattingWrapper, fetchPly
